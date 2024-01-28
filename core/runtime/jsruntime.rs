@@ -35,6 +35,9 @@ use crate::ops_metrics::dispatch_metrics_async;
 use crate::ops_metrics::OpMetricsFactoryFn;
 use crate::runtime::ContextState;
 use crate::runtime::JsRealm;
+use crate::source_map::apply_source_map;
+use crate::source_map::get_source_line;
+use crate::source_map::SourceMapApplication;
 use crate::source_map::SourceMapCache;
 use crate::source_map::SourceMapGetter;
 use crate::Extension;
@@ -370,8 +373,8 @@ pub struct JsRuntimeState {
   // This is not the right place for this, but it's the easiest way to make
   // op_apply_source_map a fast op. This stashing should happen in #[op2].
   stashed_source_map_file_name: RefCell<Option<String>>,
-  pub(crate) source_map_getter: Option<Rc<Box<dyn SourceMapGetter>>>,
-  pub(crate) source_map_cache: Rc<RefCell<SourceMapCache>>,
+  source_map_getter: Option<Rc<Box<dyn SourceMapGetter>>>,
+  source_map_cache: Rc<RefCell<SourceMapCache>>,
   pub(crate) op_state: Rc<RefCell<OpState>>,
   pub(crate) shared_array_buffer_store: Option<SharedArrayBufferStore>,
   pub(crate) compiled_wasm_module_store: Option<CompiledWasmModuleStore>,
@@ -2101,6 +2104,43 @@ where
 }
 
 impl JsRuntimeState {
+  pub(crate) fn has_source_map(&self) -> bool {
+    self.source_map_getter.is_some()
+  }
+
+  pub(crate) fn apply_source_map(
+    &self,
+    file_name: &str,
+    line_number: u32,
+    column_number: u32,
+  ) -> SourceMapApplication {
+    if let Some(getter) = self.source_map_getter.as_ref() {
+      let mut cache = self.source_map_cache.borrow_mut();
+      apply_source_map(
+        file_name,
+        line_number,
+        column_number,
+        &mut cache,
+        &***getter,
+      )
+    } else {
+      SourceMapApplication::Unchanged
+    }
+  }
+
+  pub(crate) fn get_source_line(
+    &self,
+    file_name: &str,
+    line_number: i64,
+  ) -> Option<String> {
+    if let Some(getter) = self.source_map_getter.as_ref() {
+      let mut cache = self.source_map_cache.borrow_mut();
+      get_source_line(file_name, line_number, &mut cache, &***getter)
+    } else {
+      None
+    }
+  }
+
   pub(crate) fn stash_source_map_file_name(&self, file_name: String) {
     self
       .stashed_source_map_file_name
