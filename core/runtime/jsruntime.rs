@@ -367,6 +367,9 @@ pub type CompiledWasmModuleStore = CrossIsolateStore<v8::CompiledWasmModule>;
 /// Internal state for JsRuntime which is stored in one of v8::Isolate's
 /// embedder slots.
 pub struct JsRuntimeState {
+  // This is not the right place for this, but it's the easiest way to make
+  // op_apply_source_map a fast op. This stashing should happen in #[op2].
+  stashed_source_map_file_name: RefCell<Option<String>>,
   pub(crate) source_map_getter: Option<Rc<Box<dyn SourceMapGetter>>>,
   pub(crate) source_map_cache: Rc<RefCell<SourceMapCache>>,
   pub(crate) op_state: Rc<RefCell<OpState>>,
@@ -698,6 +701,7 @@ impl JsRuntime {
     let waker = op_state.waker.clone();
     let op_state = Rc::new(RefCell::new(op_state));
     let state_rc = Rc::new(JsRuntimeState {
+      stashed_source_map_file_name: Default::default(),
       source_map_getter: options.source_map_getter.map(Rc::new),
       source_map_cache: Default::default(),
       shared_array_buffer_store: options.shared_array_buffer_store,
@@ -2097,6 +2101,17 @@ where
 }
 
 impl JsRuntimeState {
+  pub(crate) fn stash_source_map_file_name(&self, file_name: String) {
+    self
+      .stashed_source_map_file_name
+      .borrow_mut()
+      .replace(file_name);
+  }
+
+  pub(crate) fn take_source_map_file_name(&self) -> Option<String> {
+    self.stashed_source_map_file_name.borrow_mut().take()
+  }
+
   pub(crate) fn inspector(&self) -> Rc<RefCell<JsRuntimeInspector>> {
     self.inspector.borrow().as_ref().unwrap().clone()
   }

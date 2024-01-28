@@ -917,7 +917,7 @@ pub fn op_apply_source_map(
         file_name,
       } => {
         write_line_and_col_to_ret_buf(ret_buf, line_number, column_number);
-        cache.stashed_file_name.replace(file_name);
+        state.stash_source_map_file_name(file_name);
         Ok(2)
       }
     }
@@ -934,10 +934,7 @@ pub fn op_apply_source_map_filename(
   state: &JsRuntimeState,
 ) -> Result<String, Error> {
   state
-    .source_map_cache
-    .borrow_mut()
-    .stashed_file_name
-    .take()
+    .take_source_map_file_name()
     .ok_or_else(|| type_error("No stashed file name"))
 }
 
