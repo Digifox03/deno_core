@@ -35,10 +35,8 @@ use crate::ops_metrics::dispatch_metrics_async;
 use crate::ops_metrics::OpMetricsFactoryFn;
 use crate::runtime::ContextState;
 use crate::runtime::JsRealm;
-use crate::source_map::apply_source_map;
-use crate::source_map::get_source_line;
 use crate::source_map::SourceMapApplication;
-use crate::source_map::SourceMapCache;
+use crate::source_map::SourceMapContainer;
 use crate::source_map::SourceMapGetter;
 use crate::Extension;
 use crate::ExtensionFileSource;
@@ -373,8 +371,7 @@ pub struct JsRuntimeState {
   // This is not the right place for this, but it's the easiest way to make
   // op_apply_source_map a fast op. This stashing should happen in #[op2].
   stashed_source_map_file_name: RefCell<Option<String>>,
-  source_map_getter: Option<Rc<Box<dyn SourceMapGetter>>>,
-  source_map_cache: Rc<RefCell<SourceMapCache>>,
+  source_maps: Option<RefCell<SourceMapContainer<Box<dyn SourceMapGetter>>>>,
   pub(crate) op_state: Rc<RefCell<OpState>>,
   pub(crate) shared_array_buffer_store: Option<SharedArrayBufferStore>,
   pub(crate) compiled_wasm_module_store: Option<CompiledWasmModuleStore>,
@@ -705,8 +702,9 @@ impl JsRuntime {
     let op_state = Rc::new(RefCell::new(op_state));
     let state_rc = Rc::new(JsRuntimeState {
       stashed_source_map_file_name: Default::default(),
-      source_map_getter: options.source_map_getter.map(Rc::new),
-      source_map_cache: Default::default(),
+      source_maps: options
+        .source_map_getter
+        .map(|getter| RefCell::new(SourceMapContainer::new(getter))),
       shared_array_buffer_store: options.shared_array_buffer_store,
       compiled_wasm_module_store: options.compiled_wasm_module_store,
       wait_for_inspector_disconnect_callback: options
@@ -2105,7 +2103,7 @@ where
 
 impl JsRuntimeState {
   pub(crate) fn has_source_map(&self) -> bool {
-    self.source_map_getter.is_some()
+    self.source_maps.is_some()
   }
 
   pub(crate) fn apply_source_map(
@@ -2114,14 +2112,11 @@ impl JsRuntimeState {
     line_number: u32,
     column_number: u32,
   ) -> SourceMapApplication {
-    if let Some(getter) = self.source_map_getter.as_ref() {
-      let mut cache = self.source_map_cache.borrow_mut();
-      apply_source_map(
+    if let Some(source_maps) = self.source_maps.as_ref() {
+      source_maps.borrow_mut().apply_source_map(
         file_name,
         line_number,
         column_number,
-        &mut cache,
-        &***getter,
       )
     } else {
       SourceMapApplication::Unchanged
@@ -2133,12 +2128,11 @@ impl JsRuntimeState {
     file_name: &str,
     line_number: i64,
   ) -> Option<String> {
-    if let Some(getter) = self.source_map_getter.as_ref() {
-      let mut cache = self.source_map_cache.borrow_mut();
-      get_source_line(file_name, line_number, &mut cache, &***getter)
-    } else {
-      None
-    }
+    self
+      .source_maps
+      .as_ref()?
+      .borrow_mut()
+      .get_source_line(file_name, line_number)
   }
 
   pub(crate) fn stash_source_map_file_name(&self, file_name: String) {
